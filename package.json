@@ -1,0 +1,8 @@
+{
+  "name": "nour-referrals",
+  "private": true,
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "resend": "^4.1.2"
+  }
+}
