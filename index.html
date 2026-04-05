@@ -376,4 +376,15 @@ function setLang(lang) {
   });
 
   // Update stat number for fast/rapide/快速
-  const fastEl = document.querySelector('.stat:nth-child(2) .stat-num
+  const fastEl = document.querySelector('.stat:nth-child(2) .stat-number');
+  if (fastEl) {
+    const fastText = { fr: 'Rapide', en: 'Fast', zh: '快速' };
+    fastEl.textContent = fastText[lang] || fastText.fr;
+  }
+}
+
+// Apply saved language on page load
+setLang(currentLang);
+</script>
+</body>
+</html>
