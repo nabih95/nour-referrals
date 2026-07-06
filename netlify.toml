@@ -4,3 +4,7 @@
 
 [functions]
   node_bundler = "esbuild"
+
+# Copy the broker roster from NEO once a day, autonomously (06:00 UTC).
+[functions."sync-brokers"]
+  schedule = "0 6 * * *"

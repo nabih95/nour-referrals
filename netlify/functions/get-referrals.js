@@ -1,17 +1,5 @@
 const { getStore, connectLambda } = require("@netlify/blobs");
-
-// The same broker list from the dashboard
-const BROKERS = [
-  'Abed Achji', 'Amir Honarpour', 'Chuanjing Wang', 'Chunyuan Zheng',
-  'Fadi Aljundi', 'Fanny Crevier', 'Feng Ma', 'Frederick Longchamp',
-  'George Pegor Sanjian', 'Georges Abou Eyoun Eiso', 'Hugues-Dominic Pelletier',
-  'Jack Alghazi', 'Jessy Tarzikhan', 'Jinping Zhao', 'Jose Emond',
-  'Kalil Diaby', 'Karl Claude', 'Karl Perusse-Pigeon', 'Kyrillos Ibrahim',
-  'Lin Li', 'Mirna Toukatli', 'Na Li', 'Nabih Abou Eyoun Elsouc',
-  'Nadine Khalil', 'Nasri Nasra', 'Nicolas Zenie', 'Pascal Henault',
-  'Rafik Metry', 'Todd Collard', 'Vasile Radu', 'Vikas Garg',
-  'Xiaomei He', 'Zakia Slimani',
-];
+const { getBrokers } = require("./lib/brokers");
 
 exports.handler = async (event) => {
   const headers = {
@@ -28,6 +16,9 @@ exports.handler = async (event) => {
     connectLambda(event);
     const store = getStore("referrals");
     const { blobs } = await store.list();
+
+    // Live broker roster copied from NEO (falls back to cached/hardcoded).
+    const BROKERS = await getBrokers();
 
     // Build broker stats
     const stats = {};

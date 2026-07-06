@@ -541,7 +541,30 @@
   }
 
   window.setLang = applyLang;
-  document.addEventListener('DOMContentLoaded', function() { applyLang(lang); });
+
+  // Populate the "Your Name" dropdown from NEO's broker roster.
+  // The hardcoded <option> list stays as a fallback if this fetch fails.
+  function loadBrokers() {
+    var sel = document.getElementById('brokerName');
+    if (!sel) return;
+    fetch('/.netlify/functions/get-brokers')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !Array.isArray(d.brokers) || !d.brokers.length) return;
+        var current = sel.value;
+        while (sel.options.length > 1) sel.remove(1); // keep placeholder
+        d.brokers.forEach(function (name) {
+          var o = document.createElement('option');
+          o.value = name;
+          o.textContent = name;
+          sel.appendChild(o);
+        });
+        if (current) sel.value = current;
+      })
+      .catch(function () { /* keep fallback options */ });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() { applyLang(lang); loadBrokers(); });
 })();
 </script>
 
