@@ -341,7 +341,135 @@
     </div>
   </div>
 
+  <!-- Manage brokers (admin) -->
+  <div class="section-card" style="margin-top:24px;">
+    <div class="section-header">
+      <div>
+        <div id="mbTitle" style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:var(--navy);">Manage Brokers</div>
+        <div id="mbSub" style="font-size:13px;color:var(--slate);margin-top:4px;">Add a broker to the referral “Submitted By” list</div>
+      </div>
+    </div>
+    <div style="padding:20px 24px;">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <input id="mbName" type="text" maxlength="80" autocomplete="off"
+          placeholder="Full name (e.g. Jane Smith)"
+          style="flex:1;min-width:220px;padding:11px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;color:var(--navy);" />
+        <button id="mbAddBtn" type="button" onclick="mbAdd()"
+          style="background:var(--navy);color:var(--gold-light);border:1px solid var(--navy);border-radius:10px;padding:11px 20px;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;">+ Add broker</button>
+      </div>
+      <div id="mbStatus" style="margin-top:10px;font-size:13px;min-height:18px;color:var(--slate);"></div>
+      <div id="mbList" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;"></div>
+      <div id="mbHint" style="margin-top:14px;font-size:12px;color:var(--slate);line-height:1.5;">
+        Manually added brokers appear in every referral form right away and are kept even when the daily NEO sync runs.
+      </div>
+    </div>
+  </div>
+
 </main>
+
+<script>
+  // ── Manage brokers (add anyone to the "Submitted By" list) ──
+  (function () {
+    var FN = '/.netlify/functions/add-broker';
+    var authRequired = false;
+    var lastManual = [];
+
+    function tokenHeaders() {
+      var h = { 'Content-Type': 'application/json' };
+      var t = localStorage.getItem('nour_admin_token');
+      if (t) h['X-Admin-Token'] = t;
+      return h;
+    }
+
+    function status(msg, kind) {
+      var el = document.getElementById('mbStatus');
+      if (!el) return;
+      el.textContent = msg || '';
+      el.style.color = kind === 'error' ? '#c0392b' : (kind === 'ok' ? '#27ae60' : 'var(--slate)');
+    }
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function renderChips(manual) {
+      lastManual = manual || [];
+      var wrap = document.getElementById('mbList');
+      if (!wrap) return;
+      if (!lastManual.length) {
+        wrap.innerHTML = '<span style="color:#aaa;font-size:13px;">' +
+          (window._mbEmpty || 'No manually added brokers yet.') + '</span>';
+        return;
+      }
+      wrap.innerHTML = lastManual.map(function (n) {
+        return '<span style="display:inline-flex;align-items:center;gap:8px;background:var(--gold-pale);' +
+          'color:var(--navy);border:1px solid var(--gold);border-radius:100px;padding:6px 12px;' +
+          'font-size:13px;font-weight:600;">' + esc(n) +
+          '<button type="button" title="Remove" data-name="' + esc(n) + '" onclick="mbRemove(this.getAttribute(\'data-name\'))" ' +
+          'style="background:none;border:none;cursor:pointer;color:var(--slate);font-size:17px;line-height:1;padding:0;">&times;</button>' +
+          '</span>';
+      }).join('');
+    }
+    window._mbRenderChips = function () { renderChips(lastManual); };
+
+    function ensureToken() {
+      if (authRequired && !localStorage.getItem('nour_admin_token')) {
+        var t = prompt('Admin token:');
+        if (t) localStorage.setItem('nour_admin_token', t.trim());
+      }
+    }
+
+    function load() {
+      fetch(FN, { headers: tokenHeaders() })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { status((res.d && res.d.error) || 'Could not load the list.', 'error'); return; }
+          authRequired = !!res.d.authRequired;
+          renderChips(res.d.manual || []);
+        })
+        .catch(function () { status('Could not load the broker list.', 'error'); });
+    }
+
+    window.mbAdd = function () {
+      var input = document.getElementById('mbName');
+      var name = (input.value || '').trim();
+      if (!name) { status(window._mbNeedName || 'Enter a name first.', 'error'); return; }
+      ensureToken();
+      status(window._mbAdding || 'Adding…');
+      fetch(FN, { method: 'POST', headers: tokenHeaders(), body: JSON.stringify({ action: 'add', name: name }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok) {
+            if (res.d && /unauth/i.test(res.d.error || '')) localStorage.removeItem('nour_admin_token');
+            status((res.d && res.d.error) || 'Failed to add.', 'error');
+            return;
+          }
+          input.value = '';
+          renderChips(res.d.manual || []);
+          status((window._mbAdded || 'Added. It now appears in the referral forms.'), 'ok');
+        })
+        .catch(function () { status('Network error. Try again.', 'error'); });
+    };
+
+    window.mbRemove = function (name) {
+      if (!confirm((window._mbConfirm || 'Remove this broker from the list?') + '\n\n' + name)) return;
+      ensureToken();
+      fetch(FN, { method: 'POST', headers: tokenHeaders(), body: JSON.stringify({ action: 'remove', name: name }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { status((res.d && res.d.error) || 'Failed to remove.', 'error'); return; }
+          renderChips(res.d.manual || []);
+          status(window._mbRemoved || 'Removed.', 'ok');
+        })
+        .catch(function () { status('Network error. Try again.', 'error'); });
+    };
+
+    var nameInput = document.getElementById('mbName');
+    if (nameInput) nameInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') window.mbAdd(); });
+    load();
+  })();
+</script>
 
 <script>
   // ── Live data from Netlify Blobs ──
@@ -499,8 +627,8 @@ window._applyPageLang = function(lang) {
     fr: {
       title: 'Tableau de Bord – Nour Assurance',
       broker_portal: 'Portail Courtier', referral_programs: 'Programmes de Référence', current: 'Tableau de Bord', portal: '← Portail',
-      tag: 'Tableau de Bord Référencement', h1: 'Classement <em>de l'Équipe</em>',
-      sub: 'Statistiques de référencement en direct pour l'équipe Nour Assurance',
+      tag: 'Tableau de Bord Référencement', h1: 'Classement <em>de l\'Équipe</em>',
+      sub: 'Statistiques de référencement en direct pour l\'équipe Nour Assurance',
       stat1: 'Total Référencements', stat1s: 'Toutes les soumissions',
       stat2: 'Référencements Courtiers', stat2s: 'Soumissions de candidats',
       stat3: 'Hypothèques — Ce Mois', stat3t: 'Cible: 2 réf. / courtier / mois',
@@ -625,6 +753,65 @@ window._applyPageLang = function(lang) {
   // Re-render table with new lang
   if (window.renderTable) window.renderTable();
 };
+
+// Trilingual labels for the "Manage Brokers" card, chained onto the page lang.
+(function () {
+  const base = window._applyPageLang;
+  const M = {
+    fr: {
+      title: 'Gérer les Courtiers',
+      sub: 'Ajoutez un courtier à la liste « Soumis par » des formulaires',
+      placeholder: 'Nom complet (ex. Jane Smith)',
+      add: '+ Ajouter un courtier',
+      hint: 'Les courtiers ajoutés manuellement apparaissent immédiatement dans tous les formulaires et sont conservés même après la synchronisation quotidienne avec NEO.',
+      empty: 'Aucun courtier ajouté manuellement.',
+      needName: 'Entrez d’abord un nom.', adding: 'Ajout…',
+      added: 'Ajouté. Il apparaît maintenant dans les formulaires.',
+      removed: 'Retiré.', confirm: 'Retirer ce courtier de la liste ?',
+    },
+    en: {
+      title: 'Manage Brokers',
+      sub: 'Add a broker to the referral “Submitted By” list',
+      placeholder: 'Full name (e.g. Jane Smith)',
+      add: '+ Add broker',
+      hint: 'Manually added brokers appear in every referral form right away and are kept even when the daily NEO sync runs.',
+      empty: 'No manually added brokers yet.',
+      needName: 'Enter a name first.', adding: 'Adding…',
+      added: 'Added. It now appears in the referral forms.',
+      removed: 'Removed.', confirm: 'Remove this broker from the list?',
+    },
+    zh: {
+      title: '管理经纪人',
+      sub: '将经纪人添加到推荐表单的“提交人”列表',
+      placeholder: '全名（例如 Jane Smith）',
+      add: '+ 添加经纪人',
+      hint: '手动添加的经纪人会立即出现在所有推荐表单中，并在每日 NEO 同步后依然保留。',
+      empty: '尚未手动添加经纪人。',
+      needName: '请先输入姓名。', adding: '添加中…',
+      added: '已添加，现已出现在推荐表单中。',
+      removed: '已移除。', confirm: '要从列表中移除此经纪人吗？',
+    },
+  };
+  window._applyPageLang = function (lang) {
+    if (typeof base === 'function') base(lang);
+    const l = M[lang] || M.fr;
+    const set = function (id, text) { const e = document.getElementById(id); if (e) e.textContent = text; };
+    set('mbTitle', l.title);
+    set('mbSub', l.sub);
+    set('mbHint', l.hint);
+    const name = document.getElementById('mbName');
+    if (name) name.setAttribute('placeholder', l.placeholder);
+    const addBtn = document.getElementById('mbAddBtn');
+    if (addBtn) addBtn.textContent = l.add;
+    window._mbEmpty = l.empty;
+    window._mbNeedName = l.needName;
+    window._mbAdding = l.adding;
+    window._mbAdded = l.added;
+    window._mbRemoved = l.removed;
+    window._mbConfirm = l.confirm;
+    if (window._mbRenderChips) window._mbRenderChips();
+  };
+})();
 </script>
 
 </body>

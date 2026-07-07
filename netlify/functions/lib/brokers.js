@@ -33,6 +33,11 @@ const FALLBACK_BROKERS = [
 
 const CACHE_STORE = "broker-cache";
 const CACHE_KEY = "broker-list";
+// Brokers added by hand from the dashboard live under their OWN key in the same
+// store, so the daily NEO sync (which only rewrites CACHE_KEY) never wipes them.
+// getBrokers() unions them on top of the synced roster.
+const MANUAL_KEY = "manual-brokers";
+const MAX_NAME_LEN = 80;
 // 25h so the once-a-day scheduled sync is what keeps it fresh; get-brokers only
 // re-fetches on its own if a whole day passed with no successful sync.
 const CACHE_TTL_MS = 25 * 60 * 60 * 1000;
@@ -108,22 +113,96 @@ async function syncFromNeo() {
   return null;
 }
 
-// The roster the forms show. Fresh cache -> return it; otherwise sync from NEO;
-// otherwise last-known (stale) cache; otherwise the hardcoded fallback.
+// Case-insensitive union of any number of name lists, trimmed and sorted.
+function mergeNames(...lists) {
+  const seen = new Map(); // lowercased key -> first-seen display form
+  for (const list of lists) {
+    for (const raw of list || []) {
+      const name = String(raw).trim().replace(/\s+/g, " ");
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!seen.has(key)) seen.set(key, name);
+    }
+  }
+  return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+}
+
+// The brokers an admin added by hand (raw, unsorted-safe).
+async function readManual(store) {
+  if (!store) return [];
+  try {
+    const rec = await store.get(MANUAL_KEY, { type: "json" });
+    if (!rec || !Array.isArray(rec.names)) return [];
+    return rec.names.map((n) => String(n).trim()).filter(Boolean);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function listManualBrokers() {
+  return mergeNames(await readManual(openCache()));
+}
+
+// Add a hand-entered broker. Returns the updated (sorted) manual list.
+async function addManualBroker(name) {
+  const clean = String(name || "").trim().replace(/\s+/g, " ");
+  if (!clean) throw new Error("A name is required.");
+  if (clean.length > MAX_NAME_LEN) throw new Error("That name is too long.");
+  const store = openCache();
+  const current = await readManual(store);
+  const updated = mergeNames(current, [clean]);
+  if (store) {
+    try {
+      await store.setJSON(MANUAL_KEY, { names: updated, ts: Date.now() });
+    } catch (e) {
+      throw new Error("Could not save the broker. Try again.");
+    }
+  }
+  return updated;
+}
+
+// Remove a hand-entered broker (only affects the manual list, never the synced
+// roster). Returns the updated (sorted) manual list.
+async function removeManualBroker(name) {
+  const target = String(name || "").trim().toLowerCase();
+  const store = openCache();
+  const current = await readManual(store);
+  const updated = mergeNames(current.filter((n) => n.toLowerCase() !== target));
+  if (store) {
+    try {
+      await store.setJSON(MANUAL_KEY, { names: updated, ts: Date.now() });
+    } catch (e) {
+      throw new Error("Could not update the list. Try again.");
+    }
+  }
+  return updated;
+}
+
+// The roster the forms show: the synced roster (fresh cache -> NEO sync -> stale
+// cache -> hardcoded fallback) UNION the hand-added brokers, so a manual entry
+// shows up immediately and survives the daily sync.
 // Set { force: true } to bypass the fresh-cache check and re-query NEO now.
 async function getBrokers({ force = false } = {}) {
   const store = openCache();
+  const manual = await readManual(store);
 
-  if (!force) {
-    const fresh = await readCache(store, { allowStale: false });
-    if (fresh) return fresh;
+  let base = null;
+  if (!force) base = await readCache(store, { allowStale: false });
+  if (!base) {
+    const live = await syncFromNeo();
+    if (live && live.length) base = live;
   }
+  if (!base) base = await readCache(store, { allowStale: true });
+  if (!base) base = FALLBACK_BROKERS;
 
-  const live = await syncFromNeo();
-  if (live && live.length) return live;
-
-  const stale = await readCache(store, { allowStale: true });
-  return stale || FALLBACK_BROKERS;
+  return mergeNames(base, manual);
 }
 
-module.exports = { getBrokers, syncFromNeo, FALLBACK_BROKERS };
+module.exports = {
+  getBrokers,
+  syncFromNeo,
+  listManualBrokers,
+  addManualBroker,
+  removeManualBroker,
+  FALLBACK_BROKERS,
+};
